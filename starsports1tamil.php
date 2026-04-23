@@ -2,7 +2,7 @@
 set_time_limit(0);
 ignore_user_abort(true);
 
-$url = "https://ts-1dho.onrender.com/box.ts?id=4";
+$url = "https://anas-ts.onrender.com/box/9.ts;
 $channel = "Starsports1tamil";
 
 $segmentDuration = 10; // seconds
