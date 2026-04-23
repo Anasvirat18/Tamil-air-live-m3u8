@@ -2,14 +2,18 @@
 set_time_limit(0);
 ignore_user_abort(true);
 
-$url = "https://anas-ts.onrender.com/box/9.ts;
+$url = "https://anas-ts.onrender.com/box/9.ts";
 $channel = "Starsports1tamil";
 
 $segmentDuration = 10; // seconds
-$maxSegments = 6;
+$maxSegments = 999999; // no fixed count limit now
+$maxSizeBytes = 300 * 1024 * 1024; // 300 MB
+
 $folder = __DIR__ . "/$channel";
 
-if (!is_dir($folder)) mkdir($folder, 0777, true);
+if (!is_dir($folder)) {
+    mkdir($folder, 0777, true);
+}
 
 $segmentPrefix = "segment_";
 $playlistFile = "$folder/playlist.m3u8";
@@ -17,14 +21,38 @@ $playlistFile = "$folder/playlist.m3u8";
 $segmentIndex = 0;
 $segmentList = [];
 
-echo "🚀 Faster segmenter starting...\n";
+echo "🚀 300MB Limited Segmenter Starting...\n";
+
+function getFolderSize($dir) {
+    $size = 0;
+    foreach (glob("$dir/*") as $file) {
+        if (is_file($file)) {
+            $size += filesize($file);
+        }
+    }
+    return $size;
+}
+
+function cleanupOldSegments(&$segmentList, $folder, $maxSizeBytes) {
+    while (getFolderSize($folder) > $maxSizeBytes && count($segmentList) > 0) {
+        $old = array_shift($segmentList);
+        $file = "$folder/$old";
+
+        if (file_exists($file)) {
+            unlink($file);
+        }
+
+        echo "🧹 Deleted old segment: $old (size limit reached)\n";
+    }
+}
 
 while (true) {
+
     $segmentFile = "$folder/{$segmentPrefix}{$segmentIndex}.ts";
     echo "📦 Creating: $segmentFile\n";
 
-    $read = fopen($url, 'r');
-    $write = fopen($segmentFile, 'w');
+    $read = @fopen($url, 'rb');
+    $write = @fopen($segmentFile, 'wb');
 
     if (!$read || !$write) {
         echo "❌ Error opening stream. Retrying in 3s...\n";
@@ -32,18 +60,24 @@ while (true) {
         continue;
     }
 
-    // ⚡ Make reading faster
     stream_set_timeout($read, 2);
-    stream_set_blocking($read, true);
 
     $start = microtime(true);
     $bytesWritten = 0;
 
     while ((microtime(true) - $start) < $segmentDuration) {
-        $data = fread($read, 16384); // 16 KB chunk
-        if (!$data) break;
-        $bytesWritten += strlen($data);
+
+        if (feof($read)) break;
+
+        $data = fread($read, 16384);
+
+        if (!$data) {
+            usleep(100000);
+            continue;
+        }
+
         fwrite($write, $data);
+        $bytesWritten += strlen($data);
     }
 
     fclose($read);
@@ -51,18 +85,20 @@ while (true) {
 
     echo "✅ Segment saved ($bytesWritten bytes)\n";
 
-    // Maintain segment list
+    // Add segment
     $segmentList[] = "{$segmentPrefix}{$segmentIndex}.ts";
-    if (count($segmentList) > $maxSegments) {
-        $old = array_shift($segmentList);
-        @unlink("$folder/$old");
-    }
 
-    // Write M3U8 playlist
+    // 🔥 ENFORCE 300MB LIMIT
+    cleanupOldSegments($segmentList, $folder, $maxSizeBytes);
+
+    // Build playlist
     $m3u8 = "#EXTM3U\n";
     $m3u8 .= "#EXT-X-VERSION:3\n";
     $m3u8 .= "#EXT-X-TARGETDURATION:$segmentDuration\n";
-    $m3u8 .= "#EXT-X-MEDIA-SEQUENCE:" . ($segmentIndex - count($segmentList) + 1) . "\n";
+
+    $mediaSequence = max(0, $segmentIndex - count($segmentList) + 1);
+    $m3u8 .= "#EXT-X-MEDIA-SEQUENCE:$mediaSequence\n";
+
     foreach ($segmentList as $seg) {
         $m3u8 .= "#EXTINF:$segmentDuration,\n$seg\n";
     }
